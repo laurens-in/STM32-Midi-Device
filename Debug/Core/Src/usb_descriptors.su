@@ -1,0 +1,4 @@
+/home/laurens/STM32CubeIDE/workspace_1.13.2/STM-Tiny/tinyusb/hw/bsp/board_api.h:120:22:board_usb_get_serial	80	static
+../Core/Src/usb_descriptors.c:65:17:tud_descriptor_device_cb	4	static
+../Core/Src/usb_descriptors.c:121:17:tud_descriptor_configuration_cb	16	static
+../Core/Src/usb_descriptors.c:158:17:tud_descriptor_string_cb	32	static

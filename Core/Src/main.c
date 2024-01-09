@@ -22,6 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "tusb.h"
 
 /* USER CODE END Includes */
 
@@ -32,6 +33,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define USBD_STACK_SIZE    (3*configMINIMAL_STACK_SIZE/2) * (CFG_TUSB_DEBUG ? 2 : 1)
 
 /* USER CODE END PD */
 
@@ -51,6 +53,15 @@ const osThreadAttr_t defaultTask_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* USER CODE BEGIN PV */
+StackType_t  usb_device_stack[USBD_STACK_SIZE];
+StaticTask_t usb_device_taskdef;
+
+osThreadId_t usbDeviceTaskHandle;
+const osThreadAttr_t usb_device_task_attr = {
+    .name = "usbd",
+    .stack_size = USBD_STACK_SIZE,
+    .priority = osPriorityRealtime,  // Adjust the priority as needed
+};
 
 /* USER CODE END PV */
 
@@ -61,7 +72,7 @@ static void MX_USB_OTG_FS_PCD_Init(void);
 void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
-
+static void usb_device_task(void *param);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -99,6 +110,7 @@ int main(void)
   MX_GPIO_Init();
   MX_USB_OTG_FS_PCD_Init();
   /* USER CODE BEGIN 2 */
+  tusb_init();
 
   /* USER CODE END 2 */
 
@@ -126,6 +138,7 @@ int main(void)
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
+  usbDeviceTaskHandle = osThreadNew(usb_device_task, NULL, &usb_device_task_attr);
   /* add threads, ... */
   /* USER CODE END RTOS_THREADS */
 
@@ -539,6 +552,24 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     {
     	HAL_GPIO_TogglePin(GPIOE, LED4_Pin); // Toggle The Output (LED) Pin
     }
+}
+
+static void usb_device_task(void *param) {
+  (void) param;
+
+  // init device stack on configured roothub port
+  // This should be called after scheduler/kernel is started.
+  // Otherwise it could cause kernel issue since USB IRQ handler does use RTOS queue API.
+  tud_init(BOARD_TUD_RHPORT);
+
+  // RTOS forever loop
+  while (1) {
+    // put this thread to waiting state until there is new events
+    tud_task();
+
+    // following code only run if tud_task() process at least 1 event
+    // tud_cdc_write_flush();
+  }
 }
 
 /* USER CODE END 4 */
