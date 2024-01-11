@@ -24,6 +24,7 @@
 /* USER CODE BEGIN Includes */
 #include "tusb.h"
 #include "event_groups.h"
+#include <limits.h>
 
 /* USER CODE END Includes */
 
@@ -36,6 +37,11 @@
 /* USER CODE BEGIN PD */
 #define USBD_STACK_SIZE    (3*configMINIMAL_STACK_SIZE/2) * (CFG_TUSB_DEBUG ? 2 : 1)
 #define ARPEGGIATOR_CONTROL_FLAG (1 << 1)
+
+#define JOY_UP_BIT    0x01
+#define JOY_DOWN_BIT  0x02
+#define JOY_LEFT_BIT  0x04
+#define JOY_RIGHT_BIT 0x08
 
 /* USER CODE END PD */
 
@@ -83,6 +89,25 @@ const osThreadAttr_t testTask_attributes = {
     .stack_size = 128 * 4,
     .priority = (osPriority_t) osPriorityNormal,  // Adjust the priority as needed
 };
+
+typedef struct {
+	uint32_t speeds[3];
+	uint8_t current_speed;
+	uint8_t *sequences[3];
+	uint8_t current_sequence;
+
+} ArpState;
+
+static uint8_t note_sequence_1[] =
+{
+  74,78,81,86,90,93,98,102,57,61,66,69,73,78,81,85,88,92,97,100,97,92,88,85,81,78,
+  74,69,66,62,57,62,66,69,74,78,81,86,90,93,97,102,97,93,90,85,81,78,73,68,64,61,
+  56,61,64,68,74,78,81,86,90,93,98,102
+};
+static uint8_t note_sequence_2[] =
+{
+  44,45,46,47,46,45,48,49,50,46,47,48,55,54,53,52,51,50,53,52,50
+};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -94,10 +119,43 @@ void StartDefaultTask(void *argument);
 /* USER CODE BEGIN PFP */
 static void UsbDeviceTask(void *param);
 void MidiTask(void *param);
+void initArpState(ArpState *state);
+void stepArpSpeed(ArpState *state);
+void stepArpSequence(ArpState *state);
+uint32_t getArpSpeed(ArpState* state);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void initArpState(ArpState *state) {
+    state->speeds[0] = 400;
+    state->speeds[1] = 200;
+    state->speeds[2] = 100;
+
+    state->current_speed = 0;
+
+    state->sequences[0] = note_sequence_1;
+    state->sequences[1] = note_sequence_2;
+    state->sequences[2] = note_sequence_1;
+
+    state->current_sequence = 0;
+}
+
+void stepArpSpeed(ArpState *state) {
+	state->current_speed = (state->current_speed + 1) % 3;
+}
+
+void stepArpSequence(ArpState *state) {
+	state->current_sequence = (state->current_sequence + 1) % 3;
+}
+
+uint32_t getArpSpeed(ArpState* state) {
+	return state->speeds[state->current_speed];
+}
+
+uint8_t *getArpSequence(ArpState* state) {
+	return state->sequences[state->current_sequence];
+}
 
 /* USER CODE END 0 */
 
@@ -549,10 +607,10 @@ static void MX_GPIO_Init(void)
   HAL_NVIC_SetPriority(EXTI0_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI0_IRQn);
 
-  HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI1_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI1_IRQn);
 
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
@@ -564,29 +622,42 @@ static void MX_GPIO_Init(void)
 // DOCUMENTATION: EXTI Callback
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
-//		BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+	if(GPIO_Pin == JOY_UP_Pin)
+	{
+		HAL_GPIO_WritePin(GPIOE, LED1_Pin, 0);
+		xTaskNotifyFromISR( arpTaskHandle,
+		                       JOY_UP_BIT,
+		                       eSetBits,
+		                       &xHigherPriorityTaskWoken );
+	}
+	if(GPIO_Pin == JOY_DOWN_Pin)
+	{
+		HAL_GPIO_WritePin(GPIOE, LED1_Pin, 1);
+		xTaskNotifyFromISR( arpTaskHandle,
+		                       JOY_DOWN_BIT,
+		                       eSetBits,
+		                       &xHigherPriorityTaskWoken );
+	}
+	if(GPIO_Pin == JOY_LEFT_Pin)
+	{
+		HAL_GPIO_TogglePin(GPIOE, LED3_Pin);
+		xTaskNotifyFromISR( arpTaskHandle,
+				                       JOY_LEFT_BIT,
+				                       eSetBits,
+				                       &xHigherPriorityTaskWoken );
+	}
+	if(GPIO_Pin == JOY_RIGHT_Pin)
+	{
+		HAL_GPIO_TogglePin(GPIOE, LED4_Pin);
+		xTaskNotifyFromISR( arpTaskHandle,
+				                       JOY_RIGHT_BIT,
+				                       eSetBits,
+				                       &xHigherPriorityTaskWoken );
+	}
 
-    if(GPIO_Pin == JOY_UP_Pin)
-    {
-    	HAL_GPIO_WritePin(GPIOE, LED1_Pin, 0);
-//    	xEventGroupSetBitsFromISR(xArpEventGroup, ARPEGGIATOR_CONTROL_FLAG, &xHigherPriorityTaskWoken);
-    	// HAL_GPIO_TogglePin(GPIOE, LED1_Pin);
-    }
-    if(GPIO_Pin == JOY_DOWN_Pin)
-    {
-    	HAL_GPIO_WritePin(GPIOE, LED1_Pin, 1);
-//    	xEventGroupClearBitsFromISR(xArpEventGroup, ARPEGGIATOR_CONTROL_FLAG);
-    	// HAL_GPIO_TogglePin(GPIOE, LED1_Pin);
-    }
-    if(GPIO_Pin == JOY_LEFT_Pin)
-    {
-    	HAL_GPIO_TogglePin(GPIOE, LED3_Pin);
-    }
-    if(GPIO_Pin == JOY_RIGHT_Pin)
-    {
-    	HAL_GPIO_TogglePin(GPIOE, LED4_Pin);
-    }
+	portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
 }
 
 
@@ -618,69 +689,113 @@ static void UsbDeviceTask(void *param) {
 uint32_t note_pos = 0; // for testing only will go away
 
 // for testing only will go away
-uint8_t note_sequence[] =
-{
-  74,78,81,86,90,93,98,102,57,61,66,69,73,78,81,85,88,92,97,100,97,92,88,85,81,78,
-  74,69,66,62,57,62,66,69,74,78,81,86,90,93,97,102,97,93,90,85,81,78,73,68,64,61,
-  56,61,64,68,74,78,81,86,90,93,98,102
-};
+//uint8_t note_sequence[] =
+//{
+//  74,78,81,86,90,93,98,102,57,61,66,69,73,78,81,85,88,92,97,100,97,92,88,85,81,78,
+//  74,69,66,62,57,62,66,69,74,78,81,86,90,93,97,102,97,93,90,85,81,78,73,68,64,61,
+//  56,61,64,68,74,78,81,86,90,93,98,102
+//};
 
 // working MIDI Task
 void MidiTask(void *params) {
-  (void) params;
-//  EventBits_t uxBits;
+	(void) params;
 
-  // RTOS forever loop
-  for (;;) {
-//  	uxBits = xEventGroupGetBits(xArpEventGroup);
-  	uint8_t should_play = 1;
+	ArpState state;
 
-    // connected() check for DTR bit
-    // Most but not all terminal client set this when making connection
-    // if ( tud_cdc_connected() )
-    static uint32_t start_ms = 0;
-    static uint32_t period_ms = 200;
+	initArpState(&state);
 
-    uint8_t const cable_num = 0; // MIDI jack associated with USB endpoint
-    uint8_t const channel   = 0; // 0 for channel 1
+	BaseType_t xResult;
+	uint32_t ulNotifiedValue;
 
-    // The MIDI interface always creates input and output port/jack descriptors
-    // regardless of these being used or not. Therefore incoming traffic should be read
-    // (possibly just discarded) to avoid the sender blocking in IO
-    uint8_t packet[4];
-    while ( tud_midi_available() ) tud_midi_packet_read(packet);
+	uint8_t task_state = 0;
+//	static uint32_t period_ms = 200;
 
-    // send note periodically
-    if (xTaskGetTickCount() - start_ms < period_ms) should_play = 0; // not enough time
-    //    if (xTaskGetTickCount() - start_ms < 286) return;
-    if (should_play) {
-    	start_ms += period_ms;
+	TickType_t lastWake = 0;
 
-    	// Previous positions in the note sequence.
-    	int previous = (int) (note_pos - 1);
+	// RTOS forever loop
+	for (;;) {
 
-    	// If we currently are at position 0, set the
-    	// previous position to the last note in the sequence.
-    	if (previous < 0) previous = sizeof(note_sequence) - 1;
+		xResult = xTaskNotifyWait( pdFALSE, /* Don't clear bits on entry. */
+				ULONG_MAX, /* bits to clear on exit */
+				&ulNotifiedValue, /* Stores the notified value. */
+				0);
 
-    	// Send Note On for current position at full velocity (127) on channel 1.
-    	uint8_t note_on[3] = { 0x90 | channel, note_sequence[note_pos], 127 };
-    	tud_midi_stream_write(cable_num, note_on, 3);
+		if( xResult == pdPASS )
+		{
+			/* A notification was received.  See which bits were set. */
+			if( ( ulNotifiedValue & JOY_UP_BIT ) != 0 )
+			{
+				task_state = 1;
+//				lastWake = xTaskGetTickCount();
+			}
 
-    	// Send Note Off for previous note.
-    	uint8_t note_off[3] = { 0x80 | channel, note_sequence[previous], 0};
-    	tud_midi_stream_write(cable_num, note_off, 3);
+			if( ( ulNotifiedValue & JOY_DOWN_BIT ) != 0 )
+			{
+				task_state = 0;
+			}
 
-    	// Increment position
-    	note_pos++;
+			if( ( ulNotifiedValue & JOY_LEFT_BIT ) != 0 )
+			{
+				stepArpSpeed(&state);
+			}
 
-    	// If we are at the end of the sequence, start over.
-    	if (note_pos >= sizeof(note_sequence)) note_pos = 0;
-    }
+			if( ( ulNotifiedValue & JOY_RIGHT_BIT ) != 0 )
+			{
+				stepArpSequence(&state);
+			}
+		}
 
-    // For ESP32-Sx this delay is essential to allow idle how to run and reset watchdog
-    osDelay(1);
-  }
+		if (task_state){
+			uint8_t should_play = 1;
+
+			static uint32_t start_ms = 0;
+			uint32_t period_ms = getArpSpeed(&state);
+			uint8_t *note_sequence = getArpSequence(&state);
+
+			uint8_t const cable_num = 0; // MIDI jack associated with USB endpoint
+			uint8_t const channel   = 0; // 0 for channel 1
+
+			// The MIDI interface always creates input and output port/jack descriptors
+			// regardless of these being used or not. Therefore incoming traffic should be read
+			// (possibly just discarded) to avoid the sender blocking in IO
+			// TODO extract reading into it's own task
+			uint8_t packet[4];
+			while ( tud_midi_available() ) tud_midi_packet_read(packet);
+
+			uint32_t testTick = xTaskGetTickCount() - lastWake;
+
+			// send note periodically
+			if (xTaskGetTickCount() - start_ms < period_ms) should_play = 0; // not enough time
+			//    if (xTaskGetTickCount() - start_ms < 286) return;
+			if (should_play) {
+				start_ms += period_ms;
+
+				// Previous positions in the note sequence.
+				int previous = (int) (note_pos - 1);
+
+				// If we currently are at position 0, set the
+				// previous position to the last note in the sequence.
+				if (previous < 0) previous = sizeof(note_sequence) - 1;
+
+				// Send Note On for current position at full velocity (127) on channel 1.
+				uint8_t note_on[3] = { 0x90 | channel, note_sequence[note_pos], 127 };
+				tud_midi_stream_write(cable_num, note_on, 3);
+
+				// Send Note Off for previous note.
+				uint8_t note_off[3] = { 0x80 | channel, note_sequence[previous], 0};
+				tud_midi_stream_write(cable_num, note_off, 3);
+
+				// Increment position
+				note_pos++;
+
+				// If we are at the end of the sequence, start over.
+				if (note_pos >= sizeof(note_sequence)) note_pos = 0;
+			}
+		}
+
+		// For ESP32-Sx this delay is essential to allow idle how to run and reset watchdog
+		osDelay(1);
+	}
 }
 
 // Resumable Task
