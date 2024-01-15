@@ -103,7 +103,7 @@ typedef struct {
 	uint8_t current_speed;
 	uint8_t *sequences[3];
 	uint8_t current_sequence;
-	uint32_t note_pos;
+	int note_pos;
 	uint8_t running;
 
 } ArpState;
@@ -783,13 +783,10 @@ void vTimerMidiCallback(TimerHandle_t xTimer)
 
     xTimerChangePeriod( xTimer, state->speeds[state->current_speed], 0);
 
-		// Previous positions in the note sequence.
-		int previous = (int) (state->note_pos - 1);
-
 		// If we currently are at position 0, set the
 		// previous position to the last note in the sequence.
 		// TODO fix this! hardcoded magic number
-		if (previous < 0) previous = 7;
+		previous = (state->note_pos - 1 < 0) ? 7 : state->note_pos - 1;
 
     uint8_t note_on[3] = { 0x90 | channel, state->sequences[state->current_sequence][state->note_pos], 127 };
     tud_midi_stream_write(cable_num, note_on, 3);
