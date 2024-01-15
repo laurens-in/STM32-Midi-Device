@@ -25,6 +25,7 @@
 #include "tusb.h"
 #include "event_groups.h"
 #include <limits.h>
+#include "task.h"
 
 /* USER CODE END Includes */
 
@@ -76,18 +77,20 @@ const osThreadAttr_t usbDeviceTask_attributes = {
 };
 
 /* maybe i should just use FreeRTOS */
-osThreadId_t arpTaskHandle;
+//osThreadId_t arpTaskHandle;
+TaskHandle_t arpTaskHandle;
 const osThreadAttr_t arpTask_attributes = {
     .name = "arp",
     .stack_size = 128 * 4,
     .priority = (osPriority_t) osPriorityNormal,  // Adjust the priority as needed
 };
 
-osThreadId_t testTaskHandle;
-const osThreadAttr_t testTask_attributes = {
-    .name = "test",
+//osThreadId_t noteTaskHandle;
+TaskHandle_t noteTaskHandle;
+const osThreadAttr_t noteTask_attributes = {
+    .name = "note",
     .stack_size = 128 * 4,
-    .priority = (osPriority_t) osPriorityNormal,  // Adjust the priority as needed
+    .priority = (osPriority_t) osPriorityHigh,  // Adjust the priority as needed
 };
 
 //typedef struct {
@@ -101,6 +104,7 @@ const osThreadAttr_t testTask_attributes = {
 typedef struct {
 	uint32_t speeds[3];
 	uint8_t current_speed;
+	uint32_t note_length;
 	uint8_t *sequences[3];
 	uint8_t current_sequence;
 	int note_pos;
@@ -118,6 +122,9 @@ static uint8_t note_sequence_2[] =
 {
   44,45,46,47,46,45,48,49,50,46,47,48,55,54,53,52,51,50,53,52,50
 };
+
+//TODO not sure if this is smart...
+static ArpState state;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -129,6 +136,7 @@ void StartDefaultTask(void *argument);
 /* USER CODE BEGIN PFP */
 static void UsbDeviceTask(void *param);
 void MidiTask(void *param);
+void NoteTask(void *param);
 void vTimerMidiCallback(TimerHandle_t xTimer);
 
 void initArpState(ArpState *state);
@@ -144,6 +152,8 @@ void initArpState(ArpState *state) {
     state->speeds[0] = 400;
     state->speeds[1] = 200;
     state->speeds[2] = 100;
+
+    state->note_length = 50;
 
     state->current_speed = 0;
 
@@ -244,7 +254,12 @@ int main(void)
   /* USER CODE BEGIN RTOS_THREADS */
 //  usbDeviceTaskHandle = osThreadNew(UsbDeviceTask, NULL, &usbDeviceTask_attributes);
   xTaskCreateStatic(UsbDeviceTask, "usbd", USBD_STACK_SIZE, NULL, configMAX_PRIORITIES-1, usb_device_stack, &usb_device_taskdef);
-  arpTaskHandle = osThreadNew(MidiTask, NULL, &arpTask_attributes);
+//  arpTaskHandle = osThreadNew(MidiTask, NULL, &arpTask_attributes);
+//  noteTaskHandle = osThreadNew(NoteTask, NULL, &noteTask_attributes);
+  xTaskCreate(MidiTask, "arp", 128 * 4, NULL, osPriorityNormal, &arpTaskHandle);
+  xTaskCreate(NoteTask, "note", 128 * 4, NULL, osPriorityHigh, &noteTaskHandle);
+
+  vTaskSuspend(noteTaskHandle);
   /* add threads, ... */
   /* USER CODE END RTOS_THREADS */
 
@@ -716,18 +731,17 @@ void MidiTask(void *params) {
 	BaseType_t xResult;
 	uint32_t ulNotifiedValue;
 
-	static ArpState state;
 	initArpState(&state);
 
-	TimerHandle_t timer = xTimerCreate
-      (
-        "Timer",
-        getArpSpeed(&state),
-//				3, //TODO remove, for debugging only
-        pdTRUE,
-        ( void * ) &state, // initialize counter
-        vTimerMidiCallback
-      );
+//	TimerHandle_t timer = xTimerCreate
+//      (
+//        "Timer",
+//        getArpSpeed(&state),
+////				3, //TODO remove, for debugging only
+//        pdTRUE,
+//        ( void * ) &state, // initialize counter
+//        vTimerMidiCallback
+//      );
 //	static uint32_t period_ms = 200;
 
 
@@ -744,14 +758,15 @@ void MidiTask(void *params) {
 			/* A notification was received.  See which bits were set. */
 			if( ( ulNotifiedValue & JOY_UP_BIT ) != 0 )
 			{
-				 xTimerStart( timer, 0 );
+//				 xTimerStart( timer, 0 );
+				vTaskResume(noteTaskHandle);
 			}
 
 			if( ( ulNotifiedValue & JOY_DOWN_BIT ) != 0 )
 			{
-				if (timer != NULL) {
-					xTimerStop( timer, 0 );
-				}
+//					xTimerStop( timer, 0 );
+				vTaskSuspend(noteTaskHandle);
+
 				state.note_pos = 0;
 
 				uint8_t all_notes_off[3] = { 0xB0, 0x7B, 0 };
@@ -774,27 +789,64 @@ void MidiTask(void *params) {
 	}
 }
 
+void NoteTask(void *params) {
+	TickType_t xLastWakeTime;
+	TickType_t xCurrentTick;
+	xLastWakeTime = xTaskGetTickCount();
+
+	for (;;) {
+
+		xCurrentTick = xTaskGetTickCount();
+
+		if (xLastWakeTime - xCurrentTick) {
+			xLastWakeTime = xCurrentTick;
+		}
+		uint8_t const channel   = 0;
+		uint8_t const cable_num = 0;
+
+		// If we currently are at position 0, set the
+		// previous position to the last note in the sequence.
+		// TODO fix this! hardcoded magic number
+//		previous = (state->note_pos - 1 < 0) ? 7 : state->note_pos - 1;
+    uint8_t current = state.sequences[state.current_sequence][state.note_pos];
+
+    uint8_t note_on[3] = { 0x90 | channel, current, 127 };
+    tud_midi_stream_write(cable_num, note_on, 3);
+
+//    uint8_t note_off[3] = { 0x90 | channel, state->sequences[state->current_sequence][previous], 0 };
+//    tud_midi_stream_write(cable_num, note_off, 3);
+
+    TimerHandle_t timer = xTimerCreate
+    		(
+    				"Timer",
+						state.note_length,
+						pdFALSE,
+						( void * ) (uint32_t) current, // initialize counter
+						vTimerMidiCallback
+    		);
+
+    xTimerStart( timer, 0 );
+
+
+
+    stepArpNote(&state);
+
+    vTaskDelayUntil(&xLastWakeTime, state.speeds[state.current_speed]);
+	}
+
+}
+
 void vTimerMidiCallback(TimerHandle_t xTimer)
 {
 		uint8_t const channel   = 0;
 		uint8_t const cable_num = 0;
 
-    ArpState *state = (ArpState *)pvTimerGetTimerID(xTimer);
+    uint8_t current = (uint32_t) pvTimerGetTimerID(xTimer);
 
-    xTimerChangePeriod( xTimer, state->speeds[state->current_speed], 0);
-
-		// If we currently are at position 0, set the
-		// previous position to the last note in the sequence.
-		// TODO fix this! hardcoded magic number
-		previous = (state->note_pos - 1 < 0) ? 7 : state->note_pos - 1;
-
-    uint8_t note_on[3] = { 0x90 | channel, state->sequences[state->current_sequence][state->note_pos], 127 };
-    tud_midi_stream_write(cable_num, note_on, 3);
-
-    uint8_t note_off[3] = { 0x90 | channel, state->sequences[state->current_sequence][previous], 0 };
+    uint8_t note_off[3] = { 0x90 | channel, (uint8_t) current, 0 };
     tud_midi_stream_write(cable_num, note_off, 3);
 
-    stepArpNote(state);
+    xTimerDelete( xTimer, 0 );
 }
 
 //uint32_t note_pos = 0; // for testing only will go away
