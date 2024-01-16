@@ -33,7 +33,7 @@
 typedef struct {
     uint8_t current;
     uint8_t length;
-    uint32_t *options[];
+    uint32_t options[4];
 
 } OptionState;
 
@@ -44,12 +44,8 @@ typedef struct {
 } Sequence;
 
 typedef struct {
-    uint32_t speeds[4];
-    uint8_t num_speeds;
-    uint8_t current_speed;
-    uint8_t num_lengths;
-    uint32_t lengths[4];
-    uint8_t current_length;
+    OptionState speed;
+    OptionState length;
     Sequence *seqs[3];
     uint8_t num_seqs;
     uint8_t current_sequence;
@@ -120,28 +116,16 @@ uint8_t* get_arp_sequence(ArpState *state);
 uint32_t get_arp_speed(ArpState *state);
 uint32_t get_arp_length(ArpState *state);
 uint8_t get_arp_note(ArpState *state);
+
+void init_option_state(uint32_t options[4], OptionState *option_handle);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 void init_arp_state(ArpState *state) {
-    state->speeds[0] = 400;
-    state->speeds[1] = 200;
-    state->speeds[2] = 100;
-    state->speeds[3] = 25;
 
-    state->current_speed = 0;
-
-    state->num_speeds = 4;
-
-    state->lengths[0] = 400;
-    state->lengths[1] = 200;
-    state->lengths[2] = 50;
-    state->lengths[3] = 10;
-
-    state->current_length = 0;
-
-    state->num_lengths = 4;
+    init_option_state((uint32_t[]){400,200,100,50}, &state->speed);
+    init_option_state((uint32_t[]){300,150,100,25}, &state->length);
 
     state->seqs[0] = &seq_1;
     state->seqs[1] = &seq_2;
@@ -156,12 +140,21 @@ void init_arp_state(ArpState *state) {
     state->running = 0;
 }
 
+void init_option_state(uint32_t options[4], OptionState *option_handle) {
+    option_handle->current = 0;
+    option_handle->length = 4;
+    option_handle->options[0] = options[0];
+    option_handle->options[1] = options[1];
+    option_handle->options[2] = options[2];
+    option_handle->options[3] = options[3];
+}
+
 void step_arp_speed(ArpState *state) {
-    state->current_speed = (state->current_speed + 1) % state->num_speeds;
+    state->speed.current = (state->speed.current + 1) % state->speed.length;
 }
 
 void step_arp_length(ArpState *state) {
-    state->current_length = (state->current_length + 1) % state->num_lengths;
+    state->length.current = (state->length.current + 1) % state->length.length;
 }
 
 void step_arp_sequence(ArpState *state) {
@@ -175,11 +168,15 @@ void step_arp_note(ArpState *state) {
 }
 
 uint32_t get_arp_speed(ArpState *state) {
-    return state->speeds[state->current_speed];
+    uint32_t *options = state->speed.options;
+    uint8_t current = state->speed.current;
+    return options[current];
 }
 
 uint32_t get_arp_length(ArpState *state) {
-    return state->lengths[state->current_length];
+    uint32_t *options = state->length.options;
+    uint8_t current = state->length.current;
+    return options[current];
 }
 
 uint8_t* get_arp_sequence(ArpState *state) {
@@ -647,9 +644,9 @@ static void MX_GPIO_Init(void) {
 }
 
 /* USER CODE BEGIN 4 */
-//--------------------------------------------------------------------+
+//----------------------------------------------------------------------------+
 // JOYSTICK INTERRUPTS
-//--------------------------------------------------------------------+
+//----------------------------------------------------------------------------+
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
@@ -678,9 +675,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
-//--------------------------------------------------------------------+
+//----------------------------------------------------------------------------+
 // USB DEVICE TASK
-//--------------------------------------------------------------------+
+//----------------------------------------------------------------------------+
 static void vUsbDeviceTask(void *pvParameters) {
 
     // init device stack on configured roothub port
@@ -695,9 +692,9 @@ static void vUsbDeviceTask(void *pvParameters) {
     }
 }
 
-//--------------------------------------------------------------------+
+//----------------------------------------------------------------------------+
 // MIDI MANAGMENT TASK
-//--------------------------------------------------------------------+
+//----------------------------------------------------------------------------+
 void vMidiTask(void *pvParameters) {
 
     uint32_t ulNotifiedValue;
@@ -752,9 +749,9 @@ void vMidiTask(void *pvParameters) {
     }
 }
 
-//--------------------------------------------------------------------+
+//----------------------------------------------------------------------------+
 // NOTE PLAYING TASK
-//--------------------------------------------------------------------+
+//----------------------------------------------------------------------------+
 void vNoteTask(void *pvParameters) {
 
     TickType_t xLastWakeTime;
@@ -794,9 +791,9 @@ void vNoteTask(void *pvParameters) {
 
 }
 
-//--------------------------------------------------------------------+
+//----------------------------------------------------------------------------+
 // NOTE STOPPING TIMER CALLBACK
-//--------------------------------------------------------------------+
+//----------------------------------------------------------------------------+
 void vNoteOffCallback(TimerHandle_t xTimer) {
 
     uint8_t const channel = 0;
