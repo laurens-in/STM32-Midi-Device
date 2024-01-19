@@ -170,13 +170,13 @@ void step_arp_note(ArpState *state) {
 uint32_t get_arp_speed(ArpState *state) {
     uint32_t *options = state->speed.options;
     uint8_t current = state->speed.current;
-    return options[current];
+    return pdMS_TO_TICKS(options[current]);
 }
 
 uint32_t get_arp_length(ArpState *state) {
     uint32_t *options = state->length.options;
     uint8_t current = state->length.current;
-    return options[current];
+    return pdMS_TO_TICKS(options[current]);
 }
 
 uint8_t* get_arp_sequence(ArpState *state) {
@@ -788,7 +788,6 @@ void vNoteTask(void *pvParameters) {
 
         vTaskDelayUntil(&xLastWakeTime, get_arp_speed(state));
     }
-
 }
 
 //----------------------------------------------------------------------------+
