@@ -44,7 +44,7 @@ typedef struct {
 } Sequence;
 
 typedef struct {
-    OptionState speed;
+    OptionState tempo;
     OptionState length;
     Sequence *seqs[3];
     uint8_t num_seqs;
@@ -52,7 +52,7 @@ typedef struct {
     int note_pos;
     uint8_t running;
 
-} ArpState;
+} SeqState;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -83,7 +83,7 @@ const osThreadAttr_t defaultTask_attributes = { .name = "defaultTask",
 StackType_t usb_device_stack[USBD_STACK_SIZE];
 StaticTask_t usb_device_taskdef;
 
-TaskHandle_t arp_task_handle;
+TaskHandle_t seq_task_handle;
 
 static Sequence seq_1 = { .length = 6, .notes = { (uint8_t[] )
         { 64, 67, 71, 66, 71, 67 } }, };
@@ -107,24 +107,24 @@ void vMidiTask(void *pvParameters);
 void vNoteTask(void *pvParameters);
 void vNoteOffCallback(TimerHandle_t xTimer);
 
-void init_arp_state(ArpState *state);
-void step_arp_speed(ArpState *state);
-void step_arp_length(ArpState *state);
-void step_arp_sequence(ArpState *state);
-void step_arp_note(ArpState *state);
-uint8_t* get_arp_sequence(ArpState *state);
-uint32_t get_arp_speed(ArpState *state);
-uint32_t get_arp_length(ArpState *state);
-uint8_t get_arp_note(ArpState *state);
+void init_seq_state(SeqState *state);
+void step_seq_tempo(SeqState *state);
+void step_seq_length(SeqState *state);
+void step_seq_sequence(SeqState *state);
+void step_seq_note(SeqState *state);
+uint8_t* get_seq_sequence(SeqState *state);
+uint32_t get_seq_tempo(SeqState *state);
+uint32_t get_seq_length(SeqState *state);
+uint8_t get_seq_note(SeqState *state);
 
 void init_option_state(uint32_t options[4], OptionState *option_handle);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void init_arp_state(ArpState *state) {
+void init_seq_state(SeqState *state) {
 
-    init_option_state((uint32_t[]){400,200,100,50}, &state->speed);
+    init_option_state((uint32_t[]){400,200,100,50}, &state->tempo);
     init_option_state((uint32_t[]){300,150,100,25}, &state->length);
 
     state->seqs[0] = &seq_1;
@@ -149,42 +149,42 @@ void init_option_state(uint32_t options[4], OptionState *option_handle) {
     option_handle->options[3] = options[3];
 }
 
-void step_arp_speed(ArpState *state) {
-    state->speed.current = (state->speed.current + 1) % state->speed.length;
+void step_seq_tempo(SeqState *state) {
+    state->tempo.current = (state->tempo.current + 1) % state->tempo.length;
 }
 
-void step_arp_length(ArpState *state) {
+void step_seq_length(SeqState *state) {
     state->length.current = (state->length.current + 1) % state->length.length;
 }
 
-void step_arp_sequence(ArpState *state) {
+void step_seq_sequence(SeqState *state) {
     state->current_sequence = (state->current_sequence + 1) % 3;
     state->note_pos = 0;
 }
 
-void step_arp_note(ArpState *state) {
+void step_seq_note(SeqState *state) {
     state->note_pos = (state->note_pos + 1)
             % state->seqs[state->current_sequence]->length;
 }
 
-uint32_t get_arp_speed(ArpState *state) {
-    uint32_t *options = state->speed.options;
-    uint8_t current = state->speed.current;
+uint32_t get_seq_tempo(SeqState *state) {
+    uint32_t *options = state->tempo.options;
+    uint8_t current = state->tempo.current;
     return pdMS_TO_TICKS(options[current]);
 }
 
-uint32_t get_arp_length(ArpState *state) {
+uint32_t get_seq_length(SeqState *state) {
     uint32_t *options = state->length.options;
     uint8_t current = state->length.current;
     return pdMS_TO_TICKS(options[current]);
 }
 
-uint8_t* get_arp_sequence(ArpState *state) {
+uint8_t* get_seq_sequence(SeqState *state) {
     return *state->seqs[state->current_sequence]->notes;
 }
 
-uint8_t get_arp_note(ArpState *state) {
-    uint8_t *notes = get_arp_sequence(state);
+uint8_t get_seq_note(SeqState *state) {
+    uint8_t *notes = get_seq_sequence(state);
     return notes[state->note_pos];
 }
 
@@ -253,8 +253,8 @@ int main(void) {
     xTaskCreateStatic(vUsbDeviceTask, "usbd", USBD_STACK_SIZE, NULL,
     configMAX_PRIORITIES - 1, usb_device_stack, &usb_device_taskdef);
 
-    xTaskCreate(vMidiTask, "arp", 128 * 4, NULL, osPriorityNormal,
-            &arp_task_handle);
+    xTaskCreate(vMidiTask, "seq", 128 * 4, NULL, osPriorityNormal,
+            &seq_task_handle);
 
     /* USER CODE END RTOS_THREADS */
 
@@ -652,23 +652,19 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
     if (GPIO_Pin == JOY_UP_Pin) {
-        HAL_GPIO_WritePin(GPIOE, LED1_Pin, 0);
-        xTaskNotifyFromISR(arp_task_handle, JOY_UP_BIT, eSetBits,
+        xTaskNotifyFromISR(seq_task_handle, JOY_UP_BIT, eSetBits,
                 &xHigherPriorityTaskWoken);
     }
     if (GPIO_Pin == JOY_DOWN_Pin) {
-        HAL_GPIO_WritePin(GPIOE, LED1_Pin, 1);
-        xTaskNotifyFromISR(arp_task_handle, JOY_DOWN_BIT, eSetBits,
+        xTaskNotifyFromISR(seq_task_handle, JOY_DOWN_BIT, eSetBits,
                 &xHigherPriorityTaskWoken);
     }
     if (GPIO_Pin == JOY_LEFT_Pin) {
-        HAL_GPIO_TogglePin(GPIOE, LED3_Pin);
-        xTaskNotifyFromISR(arp_task_handle, JOY_LEFT_BIT, eSetBits,
+        xTaskNotifyFromISR(seq_task_handle, JOY_LEFT_BIT, eSetBits,
                 &xHigherPriorityTaskWoken);
     }
     if (GPIO_Pin == JOY_RIGHT_Pin) {
-        HAL_GPIO_TogglePin(GPIOE, LED4_Pin);
-        xTaskNotifyFromISR(arp_task_handle, JOY_RIGHT_BIT, eSetBits,
+        xTaskNotifyFromISR(seq_task_handle, JOY_RIGHT_BIT, eSetBits,
                 &xHigherPriorityTaskWoken);
     }
 
@@ -701,18 +697,18 @@ void vMidiTask(void *pvParameters) {
 
     TaskHandle_t note_task_handle;
 
-    static ArpState state;
-    init_arp_state(&state);
+    static SeqState state;
+    init_seq_state(&state);
 
     // raise priority so that note doesn't run before it is suspended
-    vTaskPrioritySet(arp_task_handle, osPriorityRealtime7);
+    vTaskPrioritySet(seq_task_handle, osPriorityRealtime7);
 
     xTaskCreate(vNoteTask, "note", 128 * 4, (void*) &state, osPriorityRealtime,
             &note_task_handle);
     vTaskSuspend(note_task_handle);
 
     // put priority down to where it was
-    vTaskPrioritySet(arp_task_handle, osPriorityHigh);
+    vTaskPrioritySet(seq_task_handle, osPriorityHigh);
 
     // RTOS forever loop
     for (;;) {
@@ -736,15 +732,15 @@ void vMidiTask(void *pvParameters) {
         }
 
         if ((ulNotifiedValue & JOY_DOWN_BIT) != 0) {
-            step_arp_length(&state);
+            step_seq_length(&state);
         }
 
         if ((ulNotifiedValue & JOY_LEFT_BIT) != 0) {
-            step_arp_speed(&state);
+            step_seq_tempo(&state);
         }
 
         if ((ulNotifiedValue & JOY_RIGHT_BIT) != 0) {
-            step_arp_sequence(&state);
+            step_seq_sequence(&state);
         }
     }
 }
@@ -758,7 +754,7 @@ void vNoteTask(void *pvParameters) {
     TickType_t xCurrentTick;
     xLastWakeTime = xTaskGetTickCount();
 
-    ArpState *state = (ArpState*) pvParameters;
+    SeqState *state = (SeqState*) pvParameters;
 
     for (;;) {
 
@@ -772,21 +768,21 @@ void vNoteTask(void *pvParameters) {
         uint8_t const channel = 0;
         uint8_t const cable_num = 0;
 
-        uint8_t current_note = get_arp_note(state);
+        uint8_t current_note = get_seq_note(state);
 
         // trigger note on
         uint8_t note_on[3] = { 0x90 | channel, current_note, 127 };
         tud_midi_stream_write(cable_num, note_on, 3);
 
         // create one-shot timer that will trigger note-off after note_length
-        TimerHandle_t timer = xTimerCreate("Timer", get_arp_length(state),
+        TimerHandle_t timer = xTimerCreate("Timer", get_seq_length(state),
         pdFALSE, (void*) (uint32_t) current_note, vNoteOffCallback);
 
         xTimerStart(timer, 0);
 
-        step_arp_note(state);
+        step_seq_note(state);
 
-        vTaskDelayUntil(&xLastWakeTime, get_arp_speed(state));
+        vTaskDelayUntil(&xLastWakeTime, get_seq_tempo(state));
     }
 }
 
